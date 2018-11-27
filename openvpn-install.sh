@@ -128,24 +128,24 @@ prefetch: yes' >> /etc/unbound/unbound.conf
 			curl -o /etc/unbound/root.hints https://www.internic.net/domain/named.cache
 
 			mv /etc/unbound/unbound.conf /etc/unbound/unbound.conf.old
-			
+
 			echo 'server:
-	use-syslog: yes
-	do-daemonize: no
-	username: "unbound"
-	directory: "/etc/unbound"
-	trust-anchor-file: trusted-key.key
-	root-hints: root.hints
-	interface: 10.8.0.1
-	access-control: 10.8.0.1/24 allow
-	port: 53
-	num-threads: 2
-	use-caps-for-id: yes
-	harden-glue: yes
-	hide-identity: yes
-	hide-version: yes
-	qname-minimisation: yes
-	prefetch: yes' > /etc/unbound/unbound.conf
+use-syslog: yes
+do-daemonize: no
+username: "unbound"
+directory: "/etc/unbound"
+trust-anchor-file: trusted-key.key
+root-hints: root.hints
+interface: 10.8.0.1
+access-control: 10.8.0.1/24 allow
+port: 53
+num-threads: 2
+use-caps-for-id: yes
+harden-glue: yes
+hide-identity: yes
+hide-version: yes
+qname-minimisation: yes
+prefetch: yes' > /etc/unbound/unbound.conf
 		fi
 
 		if [[ ! "$OS" =~ (fedora|centos) ]];then
@@ -641,10 +641,10 @@ function installOpenVPN () {
 		# ECDH keys are generated on-the-fly so we don't need to generate them beforehand
 		openssl dhparam -out dh.pem $DH_KEY_SIZE
 	fi
-	
+
 	./easyrsa build-server-full "$SERVER_NAME" nopass
 	EASYRSA_CRL_DAYS=3650 ./easyrsa gen-crl
-	
+
 	case $TLS_SIG in
 		1)
 			# Generate tls-crypt key
@@ -655,13 +655,13 @@ function installOpenVPN () {
 			openvpn --genkey --secret /etc/openvpn/tls-auth.key
 		;;
 	esac
-	
+
 	# Move all the generated files
 	cp pki/ca.crt pki/private/ca.key "pki/issued/$SERVER_NAME.crt" "pki/private/$SERVER_NAME.key" /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn
 	if [[ $DH_TYPE == "2" ]]; then
 		cp dh.pem /etc/openvpn
 	fi
-	
+
 	# Make cert revocation list readable for non-root
 	chmod 644 /etc/openvpn/crl.pem
 
@@ -681,6 +681,7 @@ persist-tun
 keepalive 10 120
 topology subnet
 server 10.8.0.0 255.255.255.0
+client-to-client
 ifconfig-pool-persist ipp.txt" >> /etc/openvpn/server.conf
 
 	# DNS resolvers
@@ -738,7 +739,7 @@ ifconfig-pool-persist ipp.txt" >> /etc/openvpn/server.conf
 			echo 'push "dhcp-option DNS 176.103.130.131"' >> /etc/openvpn/server.conf
 		;;
 	esac
-	echo 'push "redirect-gateway def1 bypass-dhcp" '>> /etc/openvpn/server.conf
+	#echo 'push "redirect-gateway def1 bypass-dhcp" '>> /etc/openvpn/server.conf
 
 	# IPv6 network settings if needed
 	if [[ "$IPV6_SUPPORT" = 'y' ]]; then
@@ -772,7 +773,7 @@ push "redirect-gateway ipv6"' >> /etc/openvpn/server.conf
 	echo "crl-verify crl.pem
 ca ca.crt
 cert $SERVER_NAME.crt
-key $SERVER_NAME.key 
+key $SERVER_NAME.key
 auth $HMAC_ALG
 cipher $CIPHER
 ncp-ciphers $CIPHER
@@ -806,7 +807,7 @@ verb 3" >> /etc/openvpn/server.conf
 	if [[ "$OS" = 'arch' || "$OS" = 'fedora' ]]; then
 		# Don't modify package-provided service
 		cp /usr/lib/systemd/system/openvpn-server@.service /etc/systemd/system/openvpn-server@.service
-		
+
 		# Workaround to fix OpenVPN service on OpenVZ
 		sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn-server@.service
 		# Another workaround to keep using /etc/openvpn/
@@ -827,12 +828,12 @@ verb 3" >> /etc/openvpn/server.conf
 	else
 		# Don't modify package-provided service
 		cp /lib/systemd/system/openvpn\@.service /etc/systemd/system/openvpn\@.service
-		
+
 		# Workaround to fix OpenVPN service on OpenVZ
 		sed -i 's|LimitNPROC|#LimitNPROC|' /etc/systemd/system/openvpn\@.service
 		# Another workaround to keep using /etc/openvpn/
 		sed -i 's|/etc/openvpn/server|/etc/openvpn|' /etc/systemd/system/openvpn\@.service
-		
+
 		systemctl daemon-reload
 		systemctl restart openvpn@server
 		systemctl enable openvpn@server
@@ -955,6 +956,24 @@ function newClient () {
 		read -rp "Select an option [1-2]: " -e -i 1 PASS
 	done
 
+
+	echo ""
+	echo "Do you want to create static IP by client?"
+	echo "   1) Yes"
+	echo "   2) No"
+
+	until [[ "$USE_STATIC_IP" =~ ^[1-2]$ ]]; do
+		read -rp "Select an option [1-2]: " -e -i 2 USE_STATIC_IP
+	done
+
+	if [[ "$USE_STATIC_IP" = '1' ]]; then
+		echo ""
+
+		until [[ "$CLIENT_IP" =~ ^([0-9]{1,3}[\.]){3}[0-9]{1,3}$ ]]; do
+			read -rp "Client ip: " -e -i 1 CLIENT_IP
+		done
+	fi
+
 	cd /etc/openvpn/easy-rsa/ || return
 	case $PASS in
 		1)
@@ -1012,6 +1031,11 @@ function newClient () {
 		esac
 	} >> "$homeDir/$CLIENT.ovpn"
 
+	if [[ $USE_STATIC_IP = "1" ]]; then
+		mkdir -p "/etc/openvpn/ccd"
+	  echo "ifconfig-push $CLIENT_IP 255.255.255.0" >> "/etc/openvpn/ccd/$CLIENT"
+	fi
+
 	echo ""
 	echo "Client $CLIENT added, the configuration file is available at $homeDir/$CLIENT.ovpn."
 	echo "Download the .ovpn file and import it in your OpenVPN client."
@@ -1048,6 +1072,7 @@ function revokeClient () {
 	find /home/ -maxdepth 2 -name "$CLIENT.ovpn" -delete
 	rm -f "/root/$CLIENT.ovpn"
 	sed -i "s|^$CLIENT,.*||" /etc/openvpn/ipp.txt
+  rm "/etc/openvpn/ccd/$CLIENT"
 
 	echo ""
 	echo "Certificate for client $CLIENT revoked."
